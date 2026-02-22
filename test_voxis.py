@@ -60,18 +60,19 @@ _ttk_stub.Separator = MagicMock
 _ttk_stub.Scrollbar = MagicMock
 sys.modules.setdefault("tkinter.ttk", _ttk_stub)
 
-# plyer stubs
-_plyer_stub = types.ModuleType("plyer")
-_plyer_notif_stub = types.ModuleType("plyer.notification")
-_plyer_notif_stub.notify = MagicMock()
-_plyer_stub.notification = _plyer_notif_stub
-sys.modules.setdefault("plyer", _plyer_stub)
-sys.modules.setdefault("plyer.notification", _plyer_notif_stub)
+# pystray stubs
+_pystray_stub = types.ModuleType("pystray")
+_pystray_stub.Icon = lambda *a, **kw: MagicMock()
+_pystray_stub.Menu = lambda *a, **kw: MagicMock()
+_pystray_stub.MenuItem = lambda *a, **kw: MagicMock()
+sys.modules.setdefault("pystray", _pystray_stub)
 
 # PIL stubs (for icon)
 _pil_stub = types.ModuleType("PIL")
 _pil_image_stub = types.ModuleType("PIL.Image")
+_pil_image_stub.new = lambda *a, **kw: MagicMock()
 _pil_draw_stub = types.ModuleType("PIL.ImageDraw")
+_pil_draw_stub.Draw = lambda *a, **kw: MagicMock()
 _pil_imagetk_stub = types.ModuleType("PIL.ImageTk")
 sys.modules.setdefault("PIL", _pil_stub)
 sys.modules.setdefault("PIL.Image", _pil_image_stub)
@@ -932,29 +933,50 @@ class TestTranscriber:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestNotify:
-    """Tests for the notify() helper."""
+    """Tests for TrayManager and the module-level notify() wrapper."""
 
-    def test_notify_calls_plyer(self):
-        with patch.object(voxis, "_plyer_notif", MagicMock()) as mock_notif:
-            voxis.notify("Title", "Message")
-            mock_notif.notify.assert_called_once()
-            kwargs = mock_notif.notify.call_args[1]
-            assert kwargs["title"] == "Title"
-            assert kwargs["app_name"] == "Voxis"
+    def test_notify_delegates_to_tray(self):
+        tray = voxis.TrayManager()
+        tray._icon = MagicMock()
+        tray.notify("Title", "Message")
+        tray._icon.notify.assert_called_once_with("Message", "Title")
+
+    def test_notify_no_tray_no_crash(self):
+        with patch.object(voxis, "_tray", None):
+            voxis.notify("Title", "Msg")  # should not raise
 
     def test_notify_truncates_long_message(self):
-        long_msg = "x" * 500
-        with patch.object(voxis, "_plyer_notif", MagicMock()) as mock_notif:
-            voxis.notify("Title", long_msg)
-            kwargs = mock_notif.notify.call_args[1]
-            assert len(kwargs["message"]) <= 200
+        tray = voxis.TrayManager()
+        tray._icon = MagicMock()
+        tray.notify("Title", "x" * 500)
+        msg_arg = tray._icon.notify.call_args[0][0]
+        assert len(msg_arg) <= 200
 
     def test_notify_exception_swallowed(self):
-        mock_notif = MagicMock()
-        mock_notif.notify.side_effect = RuntimeError("notification failed")
-        with patch.object(voxis, "_plyer_notif", mock_notif):
-            voxis.notify("Title", "Msg")  # should not raise
+        tray = voxis.TrayManager()
+        tray._icon = MagicMock()
+        tray._icon.notify.side_effect = RuntimeError("fail")
+        tray.notify("Title", "Msg")  # should not raise
 
-    def test_notify_no_plyer_no_crash(self):
-        with patch.object(voxis, "_plyer_notif", None):
-            voxis.notify("Title", "Msg")  # should not raise
+    def test_stop_no_icon_no_crash(self):
+        tray = voxis.TrayManager()
+        tray.stop()  # _icon is None, should not raise
+
+    def test_stop_calls_icon_stop(self):
+        tray = voxis.TrayManager()
+        tray._icon = MagicMock()
+        tray.stop()
+        tray._icon.stop.assert_called_once()
+
+    def test_start_creates_icon(self):
+        tray = voxis.TrayManager()
+        tray.start()
+        assert tray._icon is not None
+
+    def test_menu_items(self):
+        show_hide = MagicMock()
+        quit_fn = MagicMock()
+        tray = voxis.TrayManager(on_show_hide=show_hide, on_quit=quit_fn)
+        tray.start()
+        # Icon was constructed via pystray.Icon(...)
+        assert tray._icon is not None

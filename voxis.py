@@ -141,7 +141,7 @@ class AudioRecorder:
 
         # Check if audio is mostly silence (RMS below threshold)
         rms = np.sqrt(np.mean(audio ** 2))
-        if rms < 0.005:
+        if rms < CFG.get("silence_rms_threshold", 0.002):
             log.info(f"Recording is silence (RMS={rms:.4f}), discarding")
             return ""
 
@@ -289,18 +289,62 @@ class BrowserAI:
             self._playwright.stop()
 
 
-# ─── Notification Helper ─────────────────────────────────────────────────────
+# ─── Tray Icon / Notification Helper ─────────────────────────────────────────
 
-try:
-    from plyer import notification as _plyer_notif
-except ImportError:
-    _plyer_notif = None
+import pystray
+
+
+def _create_icon_image(size: int = 32):
+    """Create a PIL microphone icon used by both the tray and the window."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGBA", (size, size), (26, 26, 46, 255))
+    draw = ImageDraw.Draw(img)
+    s = size / 32  # scale factor
+    draw.ellipse([int(10*s), int(2*s), int(22*s), int(16*s)],
+                 fill=(233, 69, 96, 255))
+    draw.rectangle([int(13*s), int(16*s), int(19*s), int(22*s)],
+                   fill=(233, 69, 96, 255))
+    draw.line([int(16*s), int(24*s), int(16*s), int(30*s)],
+              fill=(233, 69, 96, 255), width=max(1, int(2*s)))
+    return img
+
+
+class TrayManager:
+    """Persistent system-tray icon that routes all notifications."""
+
+    def __init__(self, on_show_hide=None, on_quit=None):
+        self._on_show_hide = on_show_hide
+        self._on_quit = on_quit
+        self._icon: pystray.Icon | None = None
+
+    def start(self):
+        menu = pystray.Menu(
+            pystray.MenuItem("Show / Hide", lambda: self._on_show_hide and self._on_show_hide()),
+            pystray.MenuItem("Quit", lambda: self._on_quit and self._on_quit()),
+        )
+        self._icon = pystray.Icon("Voxis", _create_icon_image(64),
+                                  "Voxis", menu)
+        self._icon.run_detached()
+
+    def notify(self, title: str, message: str):
+        try:
+            if self._icon:
+                self._icon.notify(message[:200], title)
+        except Exception:
+            pass
+
+    def stop(self):
+        if self._icon:
+            self._icon.stop()
+
+
+_tray: TrayManager | None = None
+
 
 def notify(title: str, message: str):
     try:
-        if _plyer_notif:
-            _plyer_notif.notify(title=title, message=message[:200],
-                                app_name="Voxis", timeout=3)
+        if _tray:
+            _tray.notify(title, message)
     except Exception:
         pass
 
@@ -348,12 +392,8 @@ class VoxisGUI:
 
     def _set_icon(self):
         """Set a simple app icon."""
-        from PIL import Image, ImageDraw, ImageTk
-        img = Image.new("RGBA", (32, 32), (26, 26, 46, 255))
-        draw = ImageDraw.Draw(img)
-        draw.ellipse([10, 2, 22, 16], fill=(233, 69, 96, 255))
-        draw.rectangle([13, 16, 19, 22], fill=(233, 69, 96, 255))
-        draw.line([16, 24, 16, 30], fill=(233, 69, 96, 255), width=2)
+        from PIL import ImageTk
+        img = _create_icon_image(32)
         self._icon_photo = ImageTk.PhotoImage(img)
         self.root.iconphoto(False, self._icon_photo)
 
@@ -660,8 +700,9 @@ class VoxisApp:
         self._browser_thread = threading.Thread(target=self._browser_worker, daemon=True)
         self._browser_thread.start()
 
-        # GUI created later in run()
+        # GUI & tray created later in run()
         self.gui: VoxisGUI = None
+        self.tray: TrayManager | None = None
 
     def _browser_worker(self):
         """Single thread that handles all browser operations."""
@@ -719,7 +760,6 @@ class VoxisApp:
                 if self.gui:
                     self.gui.set_recording(True, "Rewrite")
                 self._set_status("🎙️ Recording rewrite instructions...", ACCENT)
-                notify("Voxis", "🎙️ Speak your rewrite instructions... Press Ctrl+Alt+W to stop.")
 
     def toggle_window(self):
         if self.gui:
@@ -742,7 +782,6 @@ class VoxisApp:
                 if self.gui:
                     self.gui.set_recording(True, label)
                 self._set_status(f"🎙️ Recording ({label})...", ACCENT)
-                notify("Voxis", f"🎙️ Recording ({label})... Press hotkey to stop.")
 
     def _stop_and_process(self):
         audio_path = self.recorder.stop()
@@ -879,6 +918,16 @@ class VoxisApp:
 
         # Create and run GUI
         self.gui = VoxisGUI(self)
+
+        # Persistent tray icon
+        global _tray
+        self.tray = TrayManager(
+            on_show_hide=self.toggle_window,
+            on_quit=self.quit_app,
+        )
+        self.tray.start()
+        _tray = self.tray
+
         self.gui.set_status("Ready", GREEN)
         notify("Voxis", "✅ Voxis is running! Use hotkeys to start.")
 
@@ -892,6 +941,8 @@ class VoxisApp:
         self.gui.run()  # Blocks until window closed
 
         # Cleanup
+        if self.tray:
+            self.tray.stop()
         keyboard.unhook_all()
         try:
             self._run_in_browser_thread(self.browser_ai.close)

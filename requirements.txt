@@ -6,5 +6,4 @@ pyperclip
 pystray
 Pillow
 playwright
-plyer
 pytest
