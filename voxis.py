@@ -13,6 +13,7 @@ Modes:
 
 import json
 import os
+import queue
 import re
 import sys
 import time
@@ -654,8 +655,32 @@ class VoxisApp:
         self._lock = threading.Lock()
         self._rewrite_original = ""  # Text captured for rewrite mode
 
+        # Dedicated thread for all Playwright/browser operations
+        self._browser_queue = queue.Queue()
+        self._browser_thread = threading.Thread(target=self._browser_worker, daemon=True)
+        self._browser_thread.start()
+
         # GUI created later in run()
         self.gui: VoxisGUI = None
+
+    def _browser_worker(self):
+        """Single thread that handles all browser operations."""
+        while True:
+            func, args, result_q = self._browser_queue.get()
+            try:
+                result = func(*args)
+                result_q.put(("ok", result))
+            except Exception as e:
+                result_q.put(("error", e))
+
+    def _run_in_browser_thread(self, func, *args):
+        """Run a function on the dedicated browser thread and return the result."""
+        result_q = queue.Queue()
+        self._browser_queue.put((func, args, result_q))
+        status, value = result_q.get()
+        if status == "error":
+            raise value
+        return value
 
     def toggle_dictate(self):
         self._toggle("dictate")
@@ -766,7 +791,7 @@ class VoxisApp:
             elif mode == "polish":
                 self._set_status("✨ AI is polishing text...", ACCENT2)
                 prompt = self.polish_prompt + text
-                response = self.browser_ai.send_prompt(prompt)
+                response = self._run_in_browser_thread(self.browser_ai.send_prompt, prompt)
                 pyperclip.copy(response)
                 self._set_status("✅ Polished text copied", GREEN)
                 notify("Voxis", f"📋 Polished:\n{response[:100]}")
@@ -778,7 +803,7 @@ class VoxisApp:
                 prompt = self.rewrite_prompt_template.format(
                     original=rewrite_original, instructions=text
                 )
-                response = self.browser_ai.send_prompt(prompt)
+                response = self._run_in_browser_thread(self.browser_ai.send_prompt, prompt)
                 pyperclip.copy(response)
                 self._set_status("✅ Rewritten text copied", GREEN)
                 notify("Voxis", f"📋 Rewritten:\n{response[:100]}")
@@ -794,7 +819,7 @@ class VoxisApp:
                     return
 
                 self._set_status("🤖 Waiting for AI response...", ACCENT2)
-                response = self.browser_ai.send_prompt(prompt)
+                response = self._run_in_browser_thread(self.browser_ai.send_prompt, prompt)
                 pyperclip.copy(response)
                 self._set_status("✅ AI response copied", GREEN)
                 notify("Voxis", f"📋 AI:\n{response[:100]}")
@@ -815,7 +840,7 @@ class VoxisApp:
         if provider == self.browser_ai.provider:
             return
         log.info(f"Switching AI provider to {provider}")
-        self.browser_ai.close()
+        self._run_in_browser_thread(self.browser_ai.close)
         self.browser_ai = BrowserAI(provider)
         CFG["ai_provider"] = provider
         try:
@@ -829,7 +854,7 @@ class VoxisApp:
 
     def open_browser(self):
         try:
-            self.browser_ai._ensure_browser()
+            self._run_in_browser_thread(self.browser_ai._ensure_browser)
             self._set_status("🌐 Browser ready", GREEN)
             notify("Voxis", "🌐 Browser opened. Log in if needed.")
         except Exception as e:
@@ -868,7 +893,10 @@ class VoxisApp:
 
         # Cleanup
         keyboard.unhook_all()
-        self.browser_ai.close()
+        try:
+            self._run_in_browser_thread(self.browser_ai.close)
+        except Exception:
+            pass
         log.info("Voxis exited.")
 
 

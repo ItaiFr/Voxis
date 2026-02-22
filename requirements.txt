@@ -7,3 +7,4 @@ pystray
 Pillow
 playwright
 plyer
+pytest
