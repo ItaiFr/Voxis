@@ -40,12 +40,34 @@ log = logging.getLogger("Voxis")
 # ─── Configuration ───────────────────────────────────────────────────────────
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
+HISTORY_PATH = Path(__file__).parent / "history.json"
+MAX_HISTORY = 25
 
 def load_config():
     with open(CONFIG_PATH, "r") as f:
         return json.load(f)
 
 CFG = load_config()
+
+
+def load_history() -> list[dict]:
+    if HISTORY_PATH.exists():
+        try:
+            with open(HISTORY_PATH, "r") as f:
+                entries = json.load(f)
+            return entries[-MAX_HISTORY:]
+        except Exception:
+            return []
+    return []
+
+
+def save_history(entries: list[dict]):
+    try:
+        with open(HISTORY_PATH, "w") as f:
+            json.dump(entries[-MAX_HISTORY:], f, indent=2)
+    except Exception as e:
+        log.warning(f"Could not save history: {e}")
+
 
 # ─── Whisper "You" bug filter ────────────────────────────────────────────────
 # Whisper hallucinates short phrases like "You", "Thank you", "Thanks for
@@ -321,6 +343,7 @@ class VoxisGUI:
 
         self._build_ui()
         self.history_items: list[dict] = []
+        self._load_saved_history()
 
     def _set_icon(self):
         """Set a simple app icon."""
@@ -415,9 +438,26 @@ class VoxisGUI:
         bottom = tk.Frame(self.root, bg=BG2, pady=8, padx=15)
         bottom.pack(fill="x", side="bottom")
 
-        provider = CFG.get("ai_provider", "claude").title()
-        tk.Label(bottom, text=f"Provider: {provider}", font=("Segoe UI", 9),
-                 fg=FG_DIM, bg=BG2).pack(side="left")
+        # Provider toggle buttons
+        provider_frame = tk.Frame(bottom, bg=BG2)
+        provider_frame.pack(side="left")
+
+        tk.Label(provider_frame, text="AI:", font=("Segoe UI", 9, "bold"),
+                 fg=FG_DIM, bg=BG2).pack(side="left", padx=(0, 6))
+
+        self.claude_btn = tk.Button(provider_frame, text="Claude",
+                                    font=("Segoe UI", 9), bd=0, padx=10, pady=3,
+                                    cursor="hand2",
+                                    command=lambda: self.app.switch_provider("claude"))
+        self.claude_btn.pack(side="left", padx=(0, 2))
+
+        self.chatgpt_btn = tk.Button(provider_frame, text="ChatGPT",
+                                     font=("Segoe UI", 9), bd=0, padx=10, pady=3,
+                                     cursor="hand2",
+                                     command=lambda: self.app.switch_provider("chatgpt"))
+        self.chatgpt_btn.pack(side="left")
+
+        self._update_provider_buttons(CFG.get("ai_provider", "claude"))
 
         login_btn = tk.Button(bottom, text="Open Browser / Login",
                               font=("Segoe UI", 9), fg=FG, bg=BG3,
@@ -441,22 +481,40 @@ class VoxisGUI:
                              command=self.quit)
         quit_btn.pack(side="right", padx=(0, 8))
 
+    def _update_provider_buttons(self, provider: str):
+        """Highlight the active provider button."""
+        if provider == "claude":
+            self.claude_btn.config(fg=FG, bg=ACCENT, activeforeground=FG, activebackground=ACCENT)
+            self.chatgpt_btn.config(fg=FG_DIM, bg=BG3, activeforeground=FG, activebackground=BG3)
+        else:
+            self.claude_btn.config(fg=FG_DIM, bg=BG3, activeforeground=FG, activebackground=BG3)
+            self.chatgpt_btn.config(fg=FG, bg=GREEN, activeforeground=FG, activebackground=GREEN)
+
     def _on_canvas_resize(self, event):
         self.canvas.itemconfig(self.canvas_window, width=event.width)
 
     # ── History management ──
 
+    def _load_saved_history(self):
+        entries = load_history()
+        for entry in entries:
+            self._add_history_entry(entry["mode"], entry["text"],
+                                    timestamp=entry.get("timestamp"),
+                                    persist=False)
+
     def add_history(self, mode: str, text: str):
         """Add a new entry to the history (called from any thread)."""
         self.root.after(0, self._add_history_entry, mode, text)
 
-    def _add_history_entry(self, mode: str, text: str):
+    def _add_history_entry(self, mode: str, text: str, timestamp: str = None,
+                           persist: bool = True):
         # Remove empty state label
         if self.empty_label:
             self.empty_label.destroy()
             self.empty_label = None
 
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        if timestamp is None:
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
 
         mode_colors = {
             "dictate": ("#4fc3f7", "Dictate"),
@@ -496,7 +554,14 @@ class VoxisGUI:
         text_label.pack(fill="x", pady=(4, 0))
 
         # Store reference
-        self.history_items.append({"card": card, "text": text, "mode": mode})
+        self.history_items.append({"card": card, "text": text, "mode": mode,
+                                   "timestamp": timestamp})
+
+        # Persist to file
+        if persist:
+            entries = [{"mode": h["mode"], "text": h["text"],
+                        "timestamp": h["timestamp"]} for h in self.history_items]
+            save_history(entries)
 
         # Scroll to bottom
         self.root.after(50, lambda: self.canvas.yview_moveto(1.0))
@@ -511,6 +576,7 @@ class VoxisGUI:
         for item in self.history_items:
             item["card"].destroy()
         self.history_items.clear()
+        save_history([])
         self.empty_label = tk.Label(self.history_frame,
             text="No history yet.\nPress a hotkey to start recording!",
             font=("Segoe UI", 11), fg=FG_DIM, bg=BG, justify="center", pady=40)
@@ -744,6 +810,22 @@ class VoxisApp:
         log.info(text)
         if self.gui:
             self.gui.set_status(text, color)
+
+    def switch_provider(self, provider: str):
+        if provider == self.browser_ai.provider:
+            return
+        log.info(f"Switching AI provider to {provider}")
+        self.browser_ai.close()
+        self.browser_ai = BrowserAI(provider)
+        CFG["ai_provider"] = provider
+        try:
+            with open(CONFIG_PATH, "w") as f:
+                json.dump(CFG, f, indent=4)
+        except Exception as e:
+            log.warning(f"Could not save config: {e}")
+        if self.gui:
+            self.gui.root.after(0, self.gui._update_provider_buttons, provider)
+        self._set_status(f"Switched to {provider.title()} — click 'Open Browser / Login'", GREEN)
 
     def open_browser(self):
         try:

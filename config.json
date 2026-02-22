@@ -10,7 +10,7 @@
     "min_audio_duration_sec": 0.5,
     "min_transcription_length": 2,
     "browser_profile_dir": "./browser_profile",
-    "polish_prompt": "Clean up the following transcribed speech. Fix grammar, punctuation, and capitalization. Remove filler words (um, uh, like, you know). Organize into clear paragraphs if needed. Keep the original meaning and tone. Do NOT add any commentary — reply ONLY with the cleaned-up text:\n\n",
+    "polish_prompt": "Clean up the following transcribed speech. Fix grammar, punctuation, and capitalization. Remove filler words (um, uh, like, you know). Organize into clear paragraphs if needed. Keep the original meaning and tone. Do NOT add any commentary \u00e2\u20ac\u201d reply ONLY with the cleaned-up text:\n\n",
     "rewrite_prompt": "Rewrite the following text according to the user's instructions. Reply ONLY with the rewritten text, no commentary.\n\nOriginal text:\n{original}\n\nInstructions: {instructions}",
     "selectors": {
         "claude": {

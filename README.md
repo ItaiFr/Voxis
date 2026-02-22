@@ -47,6 +47,7 @@ The result is copied to your clipboard, ready to paste.
 **Rewrite:** Select text → `Ctrl+Alt+W` → speak what to change → `Ctrl+Alt+W` → wait → `Ctrl+V`
 
 All results appear in the Voxis window history with copy buttons.
+History is saved automatically and restored when you reopen the app (last 25 entries).
 
 ---
 
@@ -67,7 +68,7 @@ This is like having an AI editor on standby:
 Edit **`config.json`** to customize:
 
 - **Hotkeys** — change any key combination
-- **AI provider** — set `"ai_provider"` to `"claude"` or `"chatgpt"`
+- **AI provider** — switch between Claude and ChatGPT using the buttons in the app (or set `"ai_provider"` in config.json)
 - **Whisper model** — `"tiny.en"` (fastest), `"base.en"` (default), `"small.en"` (most accurate)
 - **Polish prompt** — customize how the AI cleans up your text
 - **Rewrite prompt** — customize the rewrite instructions template
@@ -97,5 +98,6 @@ Voxis/
 ├── run.bat             Daily launcher
 ├── diagnose.bat        Troubleshooting helper
 ├── browser_profile/    Saves your login (auto-created)
+├── history.json        Saved history (auto-created)
 └── voxis.log           Debug log
 ```
