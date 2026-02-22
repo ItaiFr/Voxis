@@ -1,0 +1,31 @@
+{
+    "hotkey_dictate": "ctrl+alt+d",
+    "hotkey_polish": "ctrl+alt+f",
+    "hotkey_ai": "ctrl+alt+r",
+    "hotkey_rewrite": "ctrl+alt+w",
+    "hotkey_toggle_window": "ctrl+alt+v",
+    "whisper_model": "base.en",
+    "ai_provider": "claude",
+    "command_prefix": "hey claude",
+    "min_audio_duration_sec": 0.5,
+    "min_transcription_length": 2,
+    "browser_profile_dir": "./browser_profile",
+    "polish_prompt": "Clean up the following transcribed speech. Fix grammar, punctuation, and capitalization. Remove filler words (um, uh, like, you know). Organize into clear paragraphs if needed. Keep the original meaning and tone. Do NOT add any commentary — reply ONLY with the cleaned-up text:\n\n",
+    "rewrite_prompt": "Rewrite the following text according to the user's instructions. Reply ONLY with the rewritten text, no commentary.\n\nOriginal text:\n{original}\n\nInstructions: {instructions}",
+    "selectors": {
+        "claude": {
+            "url": "https://claude.ai/new",
+            "input": "div.ProseMirror[contenteditable='true']",
+            "send_button": "button[aria-label='Send Message']",
+            "response": "[data-is-streaming='false'] .font-claude-message",
+            "stop_streaming": "[data-is-streaming='true']"
+        },
+        "chatgpt": {
+            "url": "https://chatgpt.com",
+            "input": "#prompt-textarea",
+            "send_button": "button[data-testid='send-button']",
+            "response": "[data-message-author-role='assistant']",
+            "stop_streaming": "button[aria-label='Stop generating']"
+        }
+    }
+}
